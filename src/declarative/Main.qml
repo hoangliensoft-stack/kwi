@@ -1180,7 +1180,8 @@ Kirigami.ApplicationWindow {
                         }
 
                         Controls.MenuItem {
-                            text: KI18n.i18nc("@action", "Open Link")
+                            // Links to SSH server files open in a local application that saves them back.
+                            text: terminalMenu.linkUrl.toString().startsWith("sftp:") ? KI18n.i18nc("@action", "Open on This Computer") : KI18n.i18nc("@action", "Open Link")
                             icon.name: "document-open"
                             visible: terminalMenu.linkUrl.toString().length > 0
 
@@ -1238,6 +1239,16 @@ Kirigami.ApplicationWindow {
 
                         Controls.MenuItem {
                             action: openDirectoryAction
+                        }
+
+                        Controls.MenuItem {
+                            objectName: "openRemoteFileMenuItem"
+                            text: KI18n.i18nc("@action", "Open Remote File…")
+                            icon.name: "document-open-remote"
+                            visible: root.currentSession !== null && root.currentSession.hasSshInfo
+                            height: visible ? implicitHeight : 0
+
+                            onTriggered: remoteFileDialog.openFor(root.currentSession, root.terminal.selectedText)
                         }
                     }
                 }
@@ -1321,6 +1332,92 @@ Kirigami.ApplicationWindow {
                 root.sessionModel.cancelClose(rejectedRequest);
             }
 
+            root.focusTerminal();
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: remoteFileDialog
+
+        objectName: "remoteFileDialog"
+
+        property var targetSession: null
+
+        function openFor(session, selectedText: string): void {
+            targetSession = session;
+            const selection = selectedText.trim();
+            const directory = session.remoteWorkingDirectory;
+            remotePathField.text = selection.length > 0 && !selection.includes("\n") ? selection
+                : directory.length > 0 ? (directory.endsWith("/") ? directory : directory + "/")
+                : "";
+            open();
+        }
+
+        parent: Controls.Overlay.overlay
+        anchors.centerIn: parent
+        preferredWidth: Kirigami.Units.gridUnit * 28
+        maximumWidth: Math.min(preferredWidth, absoluteMaximumWidth)
+        closePolicy: Controls.Popup.CloseOnEscape
+        title: KI18n.i18nc("@title:window", "Open Remote File")
+        footer: PromptDialogFooter {
+            onRejected: remoteFileDialog.reject()
+
+            action: Kirigami.Action {
+                text: KI18n.i18nc("@action:button", "Open")
+                icon.name: "document-open"
+                enabled: remotePathField.text.trim().length > 0
+
+                onTriggered: remoteFileDialog.accept()
+            }
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+
+            Controls.Label {
+                Layout.fillWidth: true
+                text: remoteFileDialog.targetSession
+                    ? KI18n.i18nc("@info", "Open a file on %1 with an application on this computer. Saving writes it back to the server.", remoteFileDialog.targetSession.sshHostName)
+                    : ""
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+            }
+
+            Controls.TextField {
+                id: remotePathField
+
+                objectName: "remoteFilePath"
+                Layout.fillWidth: true
+                font.family: root.appSettings.fontFamily
+                placeholderText: KI18n.i18nc("@info:placeholder", "/path/to/file")
+                Accessible.name: KI18n.i18nc("@info:accessibility", "Remote file path")
+
+                onAccepted: if (text.trim().length > 0) remoteFileDialog.accept()
+            }
+        }
+
+        onOpened: {
+            remotePathField.forceActiveFocus(Qt.PopupFocusReason);
+            remotePathField.cursorPosition = remotePathField.text.length;
+        }
+
+        onAccepted: {
+            const session = targetSession;
+            targetSession = null;
+            const url = session ? session.remoteFileUrl(remotePathField.text.trim()) : "";
+
+            if (url.toString().length > 0) {
+                root.desktopIntegration.openUrl(url);
+            } else {
+                root.showPassiveNotification(KI18n.i18nc("@info", "Enter an absolute path. The server does not report its current folder."));
+            }
+
+            root.focusTerminal();
+        }
+
+        onRejected: {
+            targetSession = null;
             root.focusTerminal();
         }
     }

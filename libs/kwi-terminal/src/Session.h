@@ -15,6 +15,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantMap>
 #include <QVector>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -219,6 +220,16 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      */
     Q_PROPERTY(QString sshRemoteCommand READ sshRemoteCommand NOTIFY sshInfoChanged)
     /*!
+     * \qmlproperty string Session::remoteWorkingDirectory
+     * \readonly
+     * The SSH server's working directory, as reported by its shell through
+     * OSC 7. It is empty when hasSshInfo is false or the remote shell does
+     * not report its directory.
+     *
+     * \sa remoteFileUrl()
+     */
+    Q_PROPERTY(QString remoteWorkingDirectory READ remoteWorkingDirectory NOTIFY remoteWorkingDirectoryChanged)
+    /*!
      * \qmlproperty int Session::processId
      * \readonly
      * The local process ID, or zero when unavailable. In a sandbox, this identifies
@@ -387,6 +398,15 @@ public:
     [[nodiscard]] QString sshHostName() const;
     [[nodiscard]] int sshPort() const;
     [[nodiscard]] QString sshRemoteCommand() const;
+    [[nodiscard]] QString remoteWorkingDirectory() const;
+    /*!
+     * \qmlmethod url Session::remoteFileUrl(string path)
+     * Returns an sftp:// URL for \a path on the SSH server, which local editors
+     * can open and save in place. Relative paths resolve against
+     * remoteWorkingDirectory. Returns an empty URL when hasSshInfo is false or
+     * the path cannot be resolved.
+     */
+    [[nodiscard]] Q_INVOKABLE QUrl remoteFileUrl(const QString &path) const;
     [[nodiscard]] qint64 processId() const;
     [[nodiscard]] qint64 foregroundCommandId() const;
     [[nodiscard]] QString foregroundCommandName() const;
@@ -504,6 +524,7 @@ Q_SIGNALS:
     void launchedProgramNameChanged();
     void workingDirectoryChanged(const QString &directory);
     void sshInfoChanged();
+    void remoteWorkingDirectoryChanged();
     void processInfoChanged();
     void foregroundCommandChanged();
     /*!

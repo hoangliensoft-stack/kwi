@@ -12,6 +12,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <optional>
 
 class KProcess;
@@ -36,6 +37,10 @@ struct SshConfigurationQuery {
 
 [[nodiscard]] KWI_TERMINAL_EXPORT std::optional<SshConfigurationQuery> sshConfigurationQuery(const QStringList &arguments);
 [[nodiscard]] KWI_TERMINAL_EXPORT std::optional<SshMetadata> sshMetadata(const QByteArray &configuration, const QString &command);
+// Returns an sftp:// URL for path on destination. Relative paths resolve against
+// the absolute remote directory, and ~/ against the conventional home directory.
+// Returns an empty URL when the path cannot be resolved.
+[[nodiscard]] KWI_TERMINAL_EXPORT QUrl remoteFileUrl(const SshMetadata &destination, const QString &directory, const QString &path);
 
 class KWI_TERMINAL_EXPORT SshMetadataResolver final : public QObject
 {

@@ -106,7 +106,33 @@ QString trimLinkPunctuation(QString text)
     return text;
 }
 
-QVector<TextLink> textLinks(const QString &line, const QString &directory, bool continuesBelowViewport, std::optional<qsizetype> position = std::nullopt)
+// Resolves a path printed by an SSH session to a URL on its server.
+using RemotePathResolver = std::function<QUrl(const QString &)>;
+
+RemotePathResolver remotePathResolver(const Session *session)
+{
+    if (!session || !session->hasSshInfo()) {
+        return {};
+    }
+
+    return [session](const QString &path) {
+        return session->remoteFileUrl(path);
+    };
+}
+
+// Without filesystem access, accept a relative remote path only when it looks like one.
+bool looksLikeRemotePath(const QString &path)
+{
+    static const QRegularExpression extension(QStringLiteral(R"(\.[A-Za-z][A-Za-z0-9_-]{0,15}$)"));
+
+    return !path.startsWith(QLatin1Char('-')) && (path.contains(QLatin1Char('/')) || extension.match(path).hasMatch());
+}
+
+QVector<TextLink> textLinks(const QString &line,
+                            const QString &directory,
+                            bool continuesBelowViewport,
+                            const RemotePathResolver &remotePath = {},
+                            std::optional<qsizetype> position = std::nullopt)
 {
     QVector<TextLink> result;
     static const QRegularExpression urls(
@@ -164,6 +190,19 @@ QVector<TextLink> textLinks(const QString &line, const QString &directory, bool 
 
         QString path{label};
         path.remove(location);
+
+        // Paths printed in an SSH session name files on the server, not on this machine.
+        if (remotePath) {
+            if (path.startsWith(QLatin1Char('/')) || path.startsWith(QLatin1Char('~')) || looksLikeRemotePath(path)) {
+                const QUrl url{remotePath(path)};
+
+                if (url.isValid() && !url.isEmpty()) {
+                    result.append({start, label.size(), url, label});
+                }
+            }
+
+            continue;
+        }
 
         if (path.startsWith(QLatin1String("~/"))) {
             path.replace(0, 1, QDir::homePath());
@@ -1085,7 +1124,7 @@ QUrl TerminalView::linkAtPosition(QPointF position, QRegion *cells) const
         }
     }
 
-    const auto matches = textLinks(line, m_session->workingDirectory(), m_frame.rowWrapped.value(lastRow), offset);
+    const auto matches = textLinks(line, m_session->workingDirectory(), m_frame.rowWrapped.value(lastRow), remotePathResolver(m_session), offset);
 
     const auto match = std::ranges::find_if(matches, [offset](const auto &candidate) {
         return offset >= candidate.start && offset < candidate.start + candidate.length;
@@ -1146,6 +1185,7 @@ QVariantList TerminalView::links() const
 
     QString logicalLine;
     const QString directory{m_session->workingDirectory()};
+    const auto remotePath = remotePathResolver(m_session);
 
     for (int y{0}; y < frame.rows.size(); ++y) {
         const auto &row = frame.rows.at(y);
@@ -1177,7 +1217,7 @@ QVariantList TerminalView::links() const
         append(previousExplicit, explicitLabel);
 
         if (!frame.rowWrapped.value(y) || y + 1 == frame.rows.size()) {
-            const auto matches = textLinks(logicalLine, directory, frame.rowWrapped.value(y));
+            const auto matches = textLinks(logicalLine, directory, frame.rowWrapped.value(y), remotePath);
 
             for (const auto &link : matches) {
                 append(link.url, link.label);

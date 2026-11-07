@@ -18,6 +18,8 @@ ecm_add_test(outputsavejobtest.cpp LINK_LIBRARIES kwi-terminal ghostty-qt Qt6::T
 ecm_add_test(sessiontest.cpp LINK_LIBRARIES kwi-terminal Qt6::Test)
 ecm_add_test(texthighlightertest.cpp LINK_LIBRARIES kwi-terminal Qt6::Test)
 set_tests_properties(texthighlightertest PROPERTIES LABELS "unit;terminal")
+ecm_add_test(remotefileurltest.cpp LINK_LIBRARIES kwi-terminal Qt6::Test)
+set_tests_properties(remotefileurltest PROPERTIES LABELS "unit;process")
 set_tests_properties(ptyprocesstest hostprocessprotocoltest outputsavejobtest sessiontest
     PROPERTIES TIMEOUT 60
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

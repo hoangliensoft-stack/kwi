@@ -45,6 +45,7 @@ Session::Session(QObject *parent)
     , m_homeDirectory{QDir::homePath()}
 {
     connect(m_sshMetadata.get(), &SshMetadataResolver::changed, this, &Session::sshInfoChanged);
+    connect(m_sshMetadata.get(), &SshMetadataResolver::changed, this, &Session::remoteWorkingDirectoryChanged);
     m_terminal = std::make_unique<GhosttyQt::Terminal>(m_columns, m_rows, m_scrollbackLines);
 
     if (!m_terminal->isValid()) {
@@ -94,6 +95,7 @@ Session::Session(QObject *parent)
         });
 
         connect(m_terminal.get(), &GhosttyQt::Terminal::workingDirectoryChanged, this, &Session::refreshSessionMetadata);
+        connect(m_terminal.get(), &GhosttyQt::Terminal::workingDirectoryChanged, this, &Session::remoteWorkingDirectoryChanged);
         connect(m_terminal.get(), &GhosttyQt::Terminal::bell, this, &Session::bell);
         connect(m_terminal.get(), &GhosttyQt::Terminal::frameChanged, &m_events, &SessionEvents::frameChanged);
         connect(m_terminal.get(), &GhosttyQt::Terminal::errorOccurred, this, [this](GhosttyQt::Terminal::Error error) {
@@ -532,6 +534,35 @@ int Session::sshPort() const
 QString Session::sshRemoteCommand() const
 {
     return m_sshMetadata->info().remoteCommand;
+}
+
+QString Session::remoteWorkingDirectory() const
+{
+    if (!m_terminal || !hasSshInfo()) {
+        return {};
+    }
+
+    const QUrl url{m_terminal->workingDirectoryUrl()};
+    const QString host{url.host()};
+
+    // Only a directory reported by another host belongs to the SSH server.
+    if (!url.isLocalFile() || host.isEmpty() || host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0
+        || host.compare(m_localHostName, Qt::CaseInsensitive) == 0) {
+        return {};
+    }
+
+    const QString path{url.path()};
+
+    return path.startsWith(QLatin1Char('/')) ? path : QString{};
+}
+
+QUrl Session::remoteFileUrl(const QString &path) const
+{
+    if (!hasSshInfo()) {
+        return {};
+    }
+
+    return Kwi::remoteFileUrl(m_sshMetadata->info(), remoteWorkingDirectory(), path);
 }
 
 int Session::scrollbackLines() const

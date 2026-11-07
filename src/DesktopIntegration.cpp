@@ -234,10 +234,23 @@ void DesktopIntegration::openUrl(const QUrl &url)
         return;
     }
 
+    if (url.scheme() == u"sftp") {
+        openRemoteFile(url);
+
+        return;
+    }
+
     if (KSandbox::isFlatpak() && url.isLocalFile()) {
         // Host paths may be inaccessible to the file portal inside the sandbox.
-        // kde-open uses the host's handler without executing the file.
-        launchHostCommand(QStringLiteral("kde-open"), {url.toString(QUrl::FullyEncoded)});
+        // kde-open and gio open use the host's handler without executing the
+        // file. Desktops without either, such as GNOME without KDE tools, fall
+        // back to xdg-open.
+        static const QString script{QStringLiteral(
+            "command -v kde-open >/dev/null 2>&1 && exec kde-open \"$1\"\n"
+            "command -v gio >/dev/null 2>&1 && exec gio open \"$1\"\n"
+            "exec xdg-open \"$1\"\n")};
+
+        launchHostCommand(QStringLiteral("sh"), {QStringLiteral("-c"), script, QStringLiteral("kwi-open"), url.toString(QUrl::FullyEncoded)});
 
         return;
     }
@@ -254,6 +267,45 @@ void DesktopIntegration::openUrl(const QUrl &url)
     });
 
     job->start();
+}
+
+void DesktopIntegration::openRemoteFile(const QUrl &url)
+{
+    // Open SSH server files with the host's own handler, so the desktop's
+    // editor saves them in place through KIO or GVfs. Neither a Flatpak sandbox
+    // nor a native GNOME session can rely on Kwi's KIO having an sftp worker.
+    // KIO asks for passwords itself. GVfs only opens a mounted location, and
+    // gio mount reads a password from standard input, so ask for one with
+    // zenity when the SSH key or agent does not authenticate. Report failures
+    // as a notification, since the launched script has no other UI.
+    static const QString script{QStringLiteral(
+        "url=$1 root=$2\n"
+        "case \"${XDG_CURRENT_DESKTOP:-}\" in *KDE*) command -v kde-open >/dev/null 2>&1 && exec kde-open \"$url\" ;; esac\n"
+        "if command -v gio >/dev/null 2>&1; then\n"
+        "    if ! gio info \"$root\" >/dev/null 2>&1 && ! gio mount \"$root\" </dev/null >/dev/null 2>&1; then\n"
+        "        if command -v zenity >/dev/null 2>&1 && password=$(zenity --password --title=\"$3\" 2>/dev/null); then\n"
+        "            printf '%s\\n' \"$password\" | gio mount \"$root\" >/dev/null 2>&1\n"
+        "        fi\n"
+        "    fi\n"
+        "    unset password\n"
+        "    error=$(gio open \"$url\" 2>&1) && exit 0\n"
+        "    command -v notify-send >/dev/null 2>&1 && notify-send -a Kwi -i dialog-error \"$4\" \"$error\"\n"
+        "    exit 1\n"
+        "fi\n"
+        "exec xdg-open \"$url\"\n")};
+
+    QUrl root{url};
+    root.setPath(QStringLiteral("/"));
+    const QString server{url.userName().isEmpty() ? url.host() : url.userName() + QLatin1Char('@') + url.host()};
+
+    launchHostCommand(QStringLiteral("sh"),
+                      {QStringLiteral("-c"),
+                       script,
+                       QStringLiteral("kwi-open-remote"),
+                       url.toString(QUrl::FullyEncoded),
+                       root.toString(QUrl::FullyEncoded),
+                       i18nc("@title:window", "Password for %1", server),
+                       i18n("Could not open %1", url.fileName().isEmpty() ? url.path() : url.fileName())});
 }
 
 void DesktopIntegration::notifyBell(TerminalSession *session)

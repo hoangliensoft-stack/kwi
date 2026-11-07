@@ -62,6 +62,7 @@ private:
     void watchSession(TerminalSession *session);
     void setError(const QString &error);
     void launchHostCommand(const QString &program, const QStringList &arguments);
+    void openRemoteFile(const QUrl &url);
 
     SessionModel *m_sessions;
     QPointer<QWindow> m_window{};

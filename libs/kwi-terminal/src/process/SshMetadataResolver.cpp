@@ -8,6 +8,7 @@
 #include <KProcess>
 #include <KSandbox>
 #include <QDBusConnection>
+#include <QDir>
 #include <QHostAddress>
 #include <QProcess>
 #include <QStringView>
@@ -169,6 +170,49 @@ std::optional<SshMetadata> sshMetadata(const QByteArray &configuration, const QS
     }
 
     return info;
+}
+
+QUrl remoteFileUrl(const SshMetadata &destination, const QString &directory, const QString &path)
+{
+    if (destination.hostName.isEmpty() || path.isEmpty() || path.contains(QChar::Null)) {
+        return {};
+    }
+
+    QString absolute;
+
+    if (path.startsWith(QLatin1Char('/'))) {
+        absolute = path;
+    } else if (path == u"~" || path.startsWith(QLatin1String("~/"))) {
+        // The server does not report its home directory, so use the common layout.
+        if (destination.userName.isEmpty()) {
+            return {};
+        }
+
+        const QString home{destination.userName == u"root" ? QStringLiteral("/root") : QStringLiteral("/home/") + destination.userName};
+        absolute = home + path.mid(1);
+    } else if (path.startsWith(QLatin1Char('~'))) {
+        // ~user paths need the server's user database.
+        return {};
+    } else {
+        if (!directory.startsWith(QLatin1Char('/'))) {
+            return {};
+        }
+
+        absolute = directory + QLatin1Char('/') + path;
+    }
+
+    QUrl url;
+    url.setScheme(QStringLiteral("sftp"));
+    url.setUserName(destination.userName);
+    url.setHost(destination.hostName);
+
+    if (destination.port > 0 && destination.port != 22) {
+        url.setPort(destination.port);
+    }
+
+    url.setPath(QDir::cleanPath(absolute));
+
+    return url.isValid() ? url : QUrl{};
 }
 
 SshMetadataResolver::SshMetadataResolver(QObject *parent)
