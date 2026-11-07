@@ -1342,15 +1342,91 @@ Kirigami.ApplicationWindow {
         objectName: "remoteFileDialog"
 
         property var targetSession: null
+        // Server directory listings by the directory text they complete, such as "/opt/" or "~/".
+        property var listings: ({})
+        property string pendingDirectory
+        property url pendingUrl
+        property string completionMessage
 
         function openFor(session, selectedText: string): void {
             targetSession = session;
+            listings = {};
+            pendingDirectory = "";
+            completionMessage = "";
             const selection = selectedText.trim();
             const directory = session.remoteWorkingDirectory;
+            // Without the shell's current folder, start in the home folder.
             remotePathField.text = selection.length > 0 && !selection.includes("\n") ? selection
                 : directory.length > 0 ? (directory.endsWith("/") ? directory : directory + "/")
-                : "";
+                : "~/";
             open();
+        }
+
+        // Completes the last path component from a listing of its directory, like a shell.
+        function complete(): void {
+            const text = remotePathField.text;
+            const directory = text.substring(0, text.lastIndexOf("/") + 1);
+
+            if (!targetSession || directory.length === 0) {
+                completionMessage = KI18n.i18nc("@info", "Enter a path starting with / or ~/ to complete it.");
+                return;
+            }
+
+            if (listings[directory] !== undefined) {
+                applyCompletion(directory, listings[directory]);
+                return;
+            }
+
+            const url = targetSession.remoteFileUrl(directory);
+
+            if (url.toString().length === 0) {
+                completionMessage = KI18n.i18nc("@info", "Enter a path starting with / or ~/ to complete it.");
+                return;
+            }
+
+            pendingDirectory = directory;
+            pendingUrl = url;
+            completionMessage = KI18n.i18nc("@info", "Reading %1…", directory);
+            root.desktopIntegration.listRemoteDirectory(url);
+        }
+
+        function applyCompletion(directory: string, entries: var): void {
+            const text = remotePathField.text;
+
+            // The path was edited while the server was listed.
+            if (!text.startsWith(directory) || text.indexOf("/", directory.length) >= 0) {
+                completionMessage = "";
+                return;
+            }
+
+            const prefix = text.substring(directory.length);
+            const matches = entries.filter(entry => entry.startsWith(prefix) && (prefix.startsWith(".") || !entry.startsWith(".")));
+
+            if (matches.length === 0) {
+                completionMessage = KI18n.i18nc("@info", "No matching files.");
+                return;
+            }
+
+            let common = matches[0];
+
+            for (const match of matches) {
+                let length = 0;
+
+                while (length < common.length && length < match.length && common[length] === match[length]) {
+                    ++length;
+                }
+
+                common = common.substring(0, length);
+            }
+
+            if (common.length > prefix.length) {
+                remotePathField.text = directory + common;
+                remotePathField.cursorPosition = remotePathField.text.length;
+                completionMessage = "";
+            } else {
+                const shown = matches.slice(0, 100).join("   ");
+                completionMessage = matches.length > 100 ? shown + "   …" : shown;
+            }
         }
 
         parent: Controls.Overlay.overlay
@@ -1392,8 +1468,28 @@ Kirigami.ApplicationWindow {
                 font.family: root.appSettings.fontFamily
                 placeholderText: KI18n.i18nc("@info:placeholder", "/path/to/file")
                 Accessible.name: KI18n.i18nc("@info:accessibility", "Remote file path")
+                Accessible.description: KI18n.i18nc("@info:accessibility", "Press Tab to complete the file name")
 
+                Keys.onTabPressed: event => {
+                    event.accepted = true;
+                    remoteFileDialog.complete();
+                }
+
+                onTextEdited: remoteFileDialog.completionMessage = ""
                 onAccepted: if (text.trim().length > 0) remoteFileDialog.accept()
+            }
+
+            Controls.Label {
+                objectName: "remoteFileCompletions"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: remoteFileDialog.completionMessage
+                font.family: root.appSettings.fontFamily
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                maximumLineCount: 8
+                elide: Text.ElideRight
+                opacity: 0.8
             }
         }
 
@@ -1419,6 +1515,146 @@ Kirigami.ApplicationWindow {
         onRejected: {
             targetSession = null;
             root.focusTerminal();
+        }
+    }
+
+    Connections {
+        target: root.desktopIntegration
+
+        function onRemotePasswordRequested(url: url, server: string, error: string): void {
+            remotePasswordDialog.openFor(url, server, error, false);
+        }
+
+        function onRemoteDirectoryListed(url: url, entries: list<string>, error: string, passwordRequired: bool): void {
+            const dialog = remoteFileDialog;
+
+            if (!dialog.visible || dialog.pendingDirectory.length === 0 || url.toString() !== dialog.pendingUrl.toString()) {
+                return;
+            }
+
+            if (passwordRequired) {
+                dialog.completionMessage = "";
+                remotePasswordDialog.openFor(url, dialog.targetSession ? dialog.targetSession.sshUserName + "@" + dialog.targetSession.sshHostName : "",
+                                             error, true);
+                return;
+            }
+
+            const directory = dialog.pendingDirectory;
+            dialog.pendingDirectory = "";
+
+            if (error.length > 0) {
+                dialog.completionMessage = error;
+                return;
+            }
+
+            dialog.listings[directory] = entries;
+            dialog.applyCompletion(directory, entries);
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: remotePasswordDialog
+
+        objectName: "remotePasswordDialog"
+
+        property url targetUrl
+        property string server
+        property string error
+        // Whether the password is for completing a path in remoteFileDialog rather than opening a file.
+        property bool listing
+
+        function openFor(url: url, serverName: string, errorText: string, forListing: bool): void {
+            targetUrl = url;
+            server = serverName;
+            error = errorText;
+            listing = forListing;
+            remotePasswordField.text = "";
+            open();
+        }
+
+        function returnFocus(): void {
+            if (listing && remoteFileDialog.visible) {
+                remotePathField.forceActiveFocus(Qt.PopupFocusReason);
+            } else {
+                root.focusTerminal();
+            }
+        }
+
+        parent: Controls.Overlay.overlay
+        anchors.centerIn: parent
+        preferredWidth: Kirigami.Units.gridUnit * 24
+        maximumWidth: Math.min(preferredWidth, absoluteMaximumWidth)
+        closePolicy: Controls.Popup.CloseOnEscape
+        title: KI18n.i18nc("@title:window", "Password for %1", server)
+        footer: PromptDialogFooter {
+            onRejected: remotePasswordDialog.reject()
+
+            action: Kirigami.Action {
+                text: remotePasswordDialog.listing ? KI18n.i18nc("@action:button", "Connect") : KI18n.i18nc("@action:button", "Open")
+                icon.name: "document-open-remote"
+                enabled: remotePasswordField.text.length > 0
+
+                onTriggered: remotePasswordDialog.accept()
+            }
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+
+            Kirigami.InlineMessage {
+                Layout.fillWidth: true
+                visible: remotePasswordDialog.error.length > 0
+                type: Kirigami.MessageType.Error
+                text: remotePasswordDialog.error
+            }
+
+            Controls.Label {
+                Layout.fillWidth: true
+                text: remotePasswordDialog.listing
+                    ? KI18n.i18nc("@info", "Enter the password of %1 to browse its files.", remotePasswordDialog.server)
+                    : KI18n.i18nc("@info", "Enter the password of %1 to open %2.", remotePasswordDialog.server,
+                                  decodeURIComponent(remotePasswordDialog.targetUrl.toString().replace(/^.*\//, "")))
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+            }
+
+            Kirigami.PasswordField {
+                id: remotePasswordField
+
+                objectName: "remotePassword"
+                Layout.fillWidth: true
+                Accessible.name: KI18n.i18nc("@info:accessibility", "Server password")
+
+                onAccepted: if (text.length > 0) remotePasswordDialog.accept()
+            }
+        }
+
+        onOpened: remotePasswordField.forceActiveFocus(Qt.PopupFocusReason)
+
+        onAccepted: {
+            const password = remotePasswordField.text;
+            remotePasswordField.text = "";
+
+            if (listing) {
+                remoteFileDialog.completionMessage = KI18n.i18nc("@info", "Connecting…");
+                root.desktopIntegration.listRemoteDirectory(targetUrl, password);
+            } else {
+                root.desktopIntegration.openRemoteFileWithPassword(targetUrl, password);
+            }
+
+            returnFocus();
+        }
+
+        onRejected: {
+            remotePasswordField.text = "";
+
+            if (listing) {
+                remoteFileDialog.pendingDirectory = "";
+                remoteFileDialog.completionMessage = "";
+            }
+
+            returnFocus();
         }
     }
 

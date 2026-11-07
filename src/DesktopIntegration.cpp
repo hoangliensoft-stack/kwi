@@ -18,8 +18,12 @@
 #include <QIcon>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
+#include <QTimer>
 #include <QUrl>
 #include <QWindow>
+#include <memory>
+#include <utility>
 
 namespace Kwi
 {
@@ -44,11 +48,31 @@ namespace
 constexpr qsizetype maximumUrlLength{8192};
 constexpr qsizetype maximumNotificationLength{8192};
 constexpr qint64 notificationIntervalMs{2000};
+constexpr int hostScriptTimeoutMs{60000};
+constexpr qsizetype maximumHostScriptOutput{1024 * 1024};
+// Exit status of the remote mount scripts when the server asks for a password.
+constexpr int passwordRequiredExitCode{10};
+
+QString remoteServerName(const QUrl &url)
+{
+    return url.userName().isEmpty() ? url.host() : url.userName() + QLatin1Char('@') + url.host();
+}
+
+QUrl remoteRoot(const QUrl &url)
+{
+    QUrl root{url};
+    root.setPath(QStringLiteral("/"));
+    root.setQuery(QString{});
+    root.setFragment(QString{});
+
+    return root;
+}
 }
 
 DesktopIntegration::DesktopIntegration(SessionModel *sessions, Mode mode, QObject *parent)
     : QObject{parent}
     , m_sessions{sessions}
+    , m_mode{mode}
     , m_sessionFocused{mode == Mode::Standalone}
 {
     connect(sessions, &SessionModel::sessionAdded, this, &DesktopIntegration::watchSession);
@@ -274,38 +298,198 @@ void DesktopIntegration::openRemoteFile(const QUrl &url)
     // Open SSH server files with the host's own handler, so the desktop's
     // editor saves them in place through KIO or GVfs. Neither a Flatpak sandbox
     // nor a native GNOME session can rely on Kwi's KIO having an sftp worker.
-    // KIO asks for passwords itself. GVfs only opens a mounted location, and
-    // gio mount reads a password from standard input, so ask for one with
-    // zenity when the SSH key or agent does not authenticate. Report failures
-    // as a notification, since the launched script has no other UI.
+    // KIO asks for passwords itself. GVfs only opens a mounted location, so
+    // mount the server first. gio mount reads a password from standard input:
+    // when the SSH key or agent does not authenticate, ask for one in Kwi's
+    // window and mount again with openRemoteFileWithPassword().
     static const QString script{QStringLiteral(
-        "url=$1 root=$2\n"
-        "case \"${XDG_CURRENT_DESKTOP:-}\" in *KDE*) command -v kde-open >/dev/null 2>&1 && exec kde-open \"$url\" ;; esac\n"
-        "if command -v gio >/dev/null 2>&1; then\n"
-        "    if ! gio info \"$root\" >/dev/null 2>&1 && ! gio mount \"$root\" </dev/null >/dev/null 2>&1; then\n"
-        "        if command -v zenity >/dev/null 2>&1 && password=$(zenity --password --title=\"$3\" 2>/dev/null); then\n"
-        "            printf '%s\\n' \"$password\" | gio mount \"$root\" >/dev/null 2>&1\n"
-        "        fi\n"
-        "    fi\n"
-        "    unset password\n"
-        "    error=$(gio open \"$url\" 2>&1) && exit 0\n"
-        "    command -v notify-send >/dev/null 2>&1 && notify-send -a Kwi -i dialog-error \"$4\" \"$error\"\n"
-        "    exit 1\n"
-        "fi\n"
-        "exec xdg-open \"$url\"\n")};
+        "root=$1\n"
+        "case \"${XDG_CURRENT_DESKTOP:-}\" in *KDE*) command -v kde-open >/dev/null 2>&1 && { echo kde; exit 0; } ;; esac\n"
+        "command -v gio >/dev/null 2>&1 || { echo xdg; exit 0; }\n"
+        "gio info \"$root\" >/dev/null 2>&1 && { echo gio; exit 0; }\n"
+        "output=$(LC_ALL=C gio mount \"$root\" </dev/null 2>&1) && { echo gio; exit 0; }\n"
+        "case \"$output\" in *'Authentication Required'*) exit 10 ;; esac\n"
+        "printf '%s\\n' \"$output\"\n"
+        "exit 1\n")};
 
-    QUrl root{url};
-    root.setPath(QStringLiteral("/"));
-    const QString server{url.userName().isEmpty() ? url.host() : url.userName() + QLatin1Char('@') + url.host()};
+    clearError();
+
+    runHostScript(script, {remoteRoot(url).toString(QUrl::FullyEncoded)}, {}, [this, url](int exitCode, const QString &output) {
+        if (exitCode == 0) {
+            openMountedRemoteFile(url, output.trimmed());
+        } else if (exitCode == passwordRequiredExitCode && m_mode == Mode::Standalone) {
+            Q_EMIT remotePasswordRequested(url, remoteServerName(url), QString{});
+        } else if (exitCode == passwordRequiredExitCode) {
+            setError(i18n("%1 asks for a password. Set up an SSH key or agent to open its files.", remoteServerName(url)));
+        } else {
+            setError(i18n("Could not connect to %1: %2", remoteServerName(url), output.trimmed()));
+        }
+    });
+}
+
+void DesktopIntegration::openRemoteFileWithPassword(const QUrl &url, const QString &password)
+{
+    if (!url.isValid() || url.scheme() != u"sftp" || url.toEncoded().size() > maximumUrlLength) {
+        return;
+    }
+
+    // The password reaches gio on standard input, never on a command line.
+    // A rejected password makes gio ask again and fail at the end of input.
+    static const QString script{QStringLiteral(
+        "output=$(LC_ALL=C gio mount \"$1\" 2>&1) && exit 0\n"
+        "case \"$output\" in *'Authentication Required'*) exit 10 ;; esac\n"
+        "printf '%s\\n' \"$output\"\n"
+        "exit 1\n")};
+
+    clearError();
+
+    runHostScript(script,
+                  {remoteRoot(url).toString(QUrl::FullyEncoded)},
+                  password.toUtf8() + '\n',
+                  [this, url](int exitCode, const QString &output) {
+                      if (exitCode == 0) {
+                          openMountedRemoteFile(url, QStringLiteral("gio"));
+                      } else if (exitCode == passwordRequiredExitCode) {
+                          Q_EMIT remotePasswordRequested(url, remoteServerName(url), i18n("The password was not accepted."));
+                      } else {
+                          setError(i18n("Could not connect to %1: %2", remoteServerName(url), output.trimmed()));
+                      }
+                  });
+}
+
+void DesktopIntegration::listRemoteDirectory(const QUrl &url, const QString &password)
+{
+    if (!url.isValid() || url.scheme() != u"sftp" || url.toEncoded().size() > maximumUrlLength) {
+        return;
+    }
+
+    // Mount like openRemoteFile(), reading a password from standard input only
+    // when one was given, then list the directory through GVfs.
+    static const QString script{QStringLiteral(
+        "root=$1 directory=$2\n"
+        "command -v gio >/dev/null 2>&1 || { echo 'gio is not installed.'; exit 1; }\n"
+        "if ! gio info \"$root\" >/dev/null 2>&1; then\n"
+        "    if [ \"$3\" = password ]; then\n"
+        "        output=$(LC_ALL=C gio mount \"$root\" 2>&1)\n"
+        "    else\n"
+        "        output=$(LC_ALL=C gio mount \"$root\" </dev/null 2>&1)\n"
+        "    fi || {\n"
+        "        case \"$output\" in *'Authentication Required'*) exit 10 ;; esac\n"
+        "        printf '%s\\n' \"$output\"\n"
+        "        exit 1\n"
+        "    }\n"
+        "fi\n"
+        "exec env LC_ALL=C gio list -h -l -a standard::type \"$directory\"\n")};
+
+    const bool withPassword{!password.isEmpty()};
+
+    runHostScript(script,
+                  {remoteRoot(url).toString(QUrl::FullyEncoded), url.toString(QUrl::FullyEncoded), withPassword ? QStringLiteral("password") : QString{}},
+                  withPassword ? password.toUtf8() + '\n' : QByteArray{},
+                  [this, url, withPassword](int exitCode, const QString &output) {
+                      if (exitCode == passwordRequiredExitCode) {
+                          Q_EMIT remoteDirectoryListed(url, {}, withPassword ? i18n("The password was not accepted.") : QString{}, true);
+
+                          return;
+                      }
+
+                      if (exitCode != 0) {
+                          QString error{output.trimmed()};
+                          error.remove(QRegularExpression(QStringLiteral(R"(^gio: \S+: )")));
+                          Q_EMIT remoteDirectoryListed(url, {}, error, false);
+
+                          return;
+                      }
+
+                      QStringList entries;
+                      const auto lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+
+                      for (const QString &line : lines) {
+                          const auto fields = line.split(QLatin1Char('\t'));
+
+                          if (fields.size() < 3 || fields.first().isEmpty() || fields.first() == u"." || fields.first() == u"..") {
+                              continue;
+                          }
+
+                          entries.append(fields.last() == u"(directory)" ? fields.first() + QLatin1Char('/') : fields.first());
+                      }
+
+                      entries.sort();
+                      Q_EMIT remoteDirectoryListed(url, entries, QString{}, false);
+                  });
+}
+
+void DesktopIntegration::openMountedRemoteFile(const QUrl &url, const QString &method)
+{
+    // Report failures as a notification, since the launched script has no other UI.
+    static const QString script{QStringLiteral(
+        "url=$1\n"
+        "case \"$2\" in\n"
+        "kde) exec kde-open \"$url\" ;;\n"
+        "gio)\n"
+        "    error=$(gio open \"$url\" 2>&1) && exit 0\n"
+        "    command -v notify-send >/dev/null 2>&1 && notify-send -a Kwi -i dialog-error \"$3\" \"$error\"\n"
+        "    exit 1 ;;\n"
+        "esac\n"
+        "exec xdg-open \"$url\"\n")};
 
     launchHostCommand(QStringLiteral("sh"),
                       {QStringLiteral("-c"),
                        script,
                        QStringLiteral("kwi-open-remote"),
                        url.toString(QUrl::FullyEncoded),
-                       root.toString(QUrl::FullyEncoded),
-                       i18nc("@title:window", "Password for %1", server),
+                       method,
                        i18n("Could not open %1", url.fileName().isEmpty() ? url.path() : url.fileName())});
+}
+
+void DesktopIntegration::runHostScript(const QString &script,
+                                       const QStringList &arguments,
+                                       const QByteArray &input,
+                                       std::function<void(int exitCode, const QString &output)> done)
+{
+    QProcess setup{};
+    setup.setProgram(QStringLiteral("sh"));
+    setup.setArguments(QStringList{QStringLiteral("-c"), script, QStringLiteral("kwi-remote")} + arguments);
+    const auto context = KSandbox::makeHostContext(setup);
+
+    auto *process = new QProcess(this);
+    auto *timeout = new QTimer(process);
+    auto finish = std::make_shared<std::function<void(int, const QString &)>>(std::move(done));
+
+    process->setProgram(context.program);
+    process->setArguments(context.arguments);
+    process->setProcessChannelMode(QProcess::MergedChannels);
+    timeout->setSingleShot(true);
+    timeout->setInterval(hostScriptTimeoutMs);
+
+    connect(timeout, &QTimer::timeout, process, [process] {
+        process->kill();
+    });
+
+    connect(process, &QProcess::errorOccurred, this, [process, finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart && *finish) {
+            std::exchange(*finish, {})(-1, process->errorString());
+            process->deleteLater();
+        }
+    });
+
+    connect(process, &QProcess::finished, this, [process, finish](int exitCode, QProcess::ExitStatus status) {
+        const QString output{QString::fromLocal8Bit(process->readAll().left(maximumHostScriptOutput))};
+        process->deleteLater();
+
+        if (*finish) {
+            std::exchange(*finish, {})(status == QProcess::NormalExit ? exitCode : -1, output);
+        }
+    });
+
+    process->start();
+    timeout->start();
+
+    if (!input.isEmpty()) {
+        process->write(input);
+    }
+
+    process->closeWriteChannel();
 }
 
 void DesktopIntegration::notifyBell(TerminalSession *session)
