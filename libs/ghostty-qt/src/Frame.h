@@ -37,8 +37,19 @@ struct Cell {
     quint8 width{1}; // 0: wide spacer; 1: normal; 2: wide leader.
     quint8 underline{0}; // None, single, double, curly, dotted, dashed.
     bool defaultBackground{true};
+    bool defaultForeground{true}; // No SGR foreground color and not inverse.
 
     bool operator==(const Cell &) const = default;
+};
+
+// A foreground override applied while rendering, without changing the terminal contents.
+struct TextHighlight {
+    QRect cells; // Viewport cell coordinates, a single row.
+    QRgb foreground{0};
+    bool bold{false};
+    bool faint{false};
+
+    bool operator==(const TextHighlight &) const = default;
 };
 
 enum class CursorStyle {

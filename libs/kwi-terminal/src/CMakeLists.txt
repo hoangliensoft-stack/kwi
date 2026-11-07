@@ -39,6 +39,7 @@ ecm_add_qml_module(kwi-terminal
         TerminalView.h TerminalView.cpp
         TerminalAccessible.cpp
         TerminalSearch.h TerminalSearch.cpp
+        TextHighlighter_p.h TextHighlighter.cpp
 )
 target_include_directories(kwi-terminal PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")

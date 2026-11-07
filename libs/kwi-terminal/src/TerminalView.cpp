@@ -347,6 +347,8 @@ void TerminalView::changeSession(Session *newSession)
     m_zoom = m_session ? m_session->zoomOffset() : 0;
     m_frame = {};
     m_searchMatches = {};
+    m_textHighlights = {};
+    m_textHighlightCache.clear();
     m_hasBlinkingText = false;
     updateBlinkTimers();
     ++m_frameRevision;
@@ -579,6 +581,140 @@ void TerminalView::setCursorBlinking(bool blinking)
     Q_EMIT appearanceChanged();
 }
 
+qreal TerminalView::contentPadding() const
+{
+    return m_contentPadding;
+}
+
+void TerminalView::setContentPadding(qreal padding)
+{
+    if (!std::isfinite(padding)) {
+        return;
+    }
+
+    padding = qBound(0.0, padding, 64.0);
+
+    if (m_contentPadding == padding) {
+        return;
+    }
+
+    m_contentPadding = padding;
+    updateMetrics();
+
+    Q_EMIT appearanceChanged();
+}
+
+bool TerminalView::syntaxHighlighting() const
+{
+    return m_syntaxHighlighting;
+}
+
+void TerminalView::setSyntaxHighlighting(bool enabled)
+{
+    if (m_syntaxHighlighting == enabled) {
+        return;
+    }
+
+    m_syntaxHighlighting = enabled;
+    m_textHighlightCache.clear();
+    updateTextHighlights();
+
+    Q_EMIT appearanceChanged();
+}
+
+void TerminalView::updateTextHighlights()
+{
+    QList<GhosttyQt::TextHighlight> highlights;
+
+    if (m_syntaxHighlighting && m_highlightPalette.size() >= 8) {
+        struct Position {
+            qsizetype start;
+            int x;
+            int y;
+            int width;
+            bool eligible;
+        };
+
+        // Bound the cache by discarding it wholesale, which is cheap compared to matching.
+        if (m_textHighlightCache.size() > 4096) {
+            m_textHighlightCache.clear();
+        }
+
+        QString line;
+        QList<Position> positions;
+
+        for (int firstRow{0}; firstRow < m_frame.rows.size();) {
+            int lastRow{firstRow};
+
+            while (lastRow + 1 < m_frame.rows.size() && m_frame.rowWrapped.value(lastRow)) {
+                ++lastRow;
+            }
+
+            line.clear();
+            positions.clear();
+
+            for (int y{firstRow}; y <= lastRow; ++y) {
+                const auto &row = m_frame.rows[y];
+
+                for (int x{0}; x < row.size(); ++x) {
+                    const auto &cell = row[x];
+
+                    if (!cell.width) {
+                        continue;
+                    }
+
+                    const bool eligible{cell.defaultForeground && !(cell.flags & (GhosttyQt::Invisible | GhosttyQt::ImagePlaceholder))};
+                    positions += {line.size(), x, y, cell.width, eligible};
+                    line += cell.text.isEmpty() ? QStringLiteral(" ") : cell.text;
+                }
+            }
+
+            firstRow = lastRow + 1;
+
+            if (line.trimmed().isEmpty()) {
+                continue;
+            }
+
+            auto cached = m_textHighlightCache.constFind(line);
+
+            if (cached == m_textHighlightCache.cend()) {
+                cached = m_textHighlightCache.insert(line, textHighlightSpans(line));
+            }
+
+            auto position = positions.cbegin();
+
+            for (const auto &span : *cached) {
+                const QRgb color{span.color == TextHighlightSpan::DefaultColor ? m_frame.foreground.rgb() : m_highlightPalette.at(span.color)};
+
+                // Find the cell containing the span start, which may be inside a grapheme.
+                while (std::next(position) != positions.cend() && std::next(position)->start <= span.start) {
+                    ++position;
+                }
+
+                for (auto it = position; it != positions.cend() && it->start < span.start + span.length; ++it) {
+                    if (!it->eligible) {
+                        continue;
+                    }
+
+                    auto *previous = highlights.isEmpty() ? nullptr : &highlights.last();
+
+                    if (previous && previous->cells.top() == it->y && previous->cells.right() + 1 == it->x && previous->foreground == color
+                        && previous->bold == span.bold && previous->faint == span.faint) {
+                        previous->cells.setRight(it->x + it->width - 1);
+                    } else {
+                        highlights += {QRect(it->x, it->y, it->width, 1), color, span.bold, span.faint};
+                    }
+                }
+            }
+        }
+    }
+
+    if (m_textHighlights != highlights) {
+        m_textHighlights = std::move(highlights);
+        update();
+    }
+}
+
 QString TerminalView::selectedText() const
 {
     return m_session ? m_session->selectionText() : QString();
@@ -638,6 +774,7 @@ void TerminalView::updatePolish()
 
     if (m_session && m_session->snapshot(m_frame)) {
         m_searchMatches = m_search->viewportMatches(previousOffset != m_frame.scrollOffset);
+        updateTextHighlights();
         ++m_frameRevision;
 
         if (m_frame.foreground != previousForeground || m_frame.background != previousBackground) {
@@ -694,7 +831,7 @@ void TerminalView::updateMetrics()
     const qreal dpi{window() && window()->screen() ? window()->screen()->logicalDotsPerInch() : 96};
 
     // Align the clip and padding on a physical pixel to avoid a seam.
-    m_padding = qRound(Padding * dpr) / dpr;
+    m_padding = qRound(m_contentPadding * dpr) / dpr;
     const auto metrics = GhosttyQt::Quick::fontMetrics(m_font, dpr, dpi);
     m_cellWidth = metrics.cellSize.width();
     m_cellHeight = metrics.cellSize.height();
@@ -748,6 +885,12 @@ void TerminalView::applyColors(const TerminalColors &colors)
     }
 
     m_session->setColors(colors.foreground, colors.background, colors.ansi, colors.boldForeground);
+
+    if (m_highlightPalette != colors.ansi) {
+        m_highlightPalette = colors.ansi;
+        updateTextHighlights();
+    }
+
     m_session->terminal()->setDecorations(colors.cursor, colors.selectionForeground, colors.selectionBackground);
     updateCursorDefaults();
     refresh();
@@ -831,6 +974,7 @@ QSGNode *TerminalView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     options.preeditAttributes = m_preeditAttributes;
     options.searchMatches = m_searchMatches;
     options.hoveredLink = m_highlightedLink;
+    options.textHighlights = m_textHighlights;
     const QPalette palette{QGuiApplication::palette()};
     options.searchForeground = palette.color(QPalette::Active, QPalette::Text);
     options.searchBackground = KColorUtils::mix(palette.color(QPalette::Active, QPalette::Base), palette.color(QPalette::Active, QPalette::Highlight), 0.35);

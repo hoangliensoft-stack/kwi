@@ -104,6 +104,24 @@ SettingsPage {
             }
 
             Forms.FormEntry {
+                title: KI18n.i18nc("@label:spinbox", "Padding (px):")
+                enabled: !root.appSettings.isTerminalPaddingImmutable
+
+                contentItem: Controls.SpinBox {
+                    objectName: "terminalPaddingSetting"
+                    editable: true
+                    from: 0
+                    to: 32
+                    value: root.appSettings.terminalPadding
+
+                    onValueModified: {
+                        root.appSettings.terminalPadding = value;
+                        root.appSettings.save();
+                    }
+                }
+            }
+
+            Forms.FormEntry {
                 fullWidth: true
 
                 contentItem: Controls.Label {
@@ -206,6 +224,23 @@ SettingsPage {
                                 onTriggered: root.terminalPalettes.removeScheme(root.appSettings.colorScheme)
                             }
                         }
+                    }
+                }
+            }
+
+            Forms.FormEntry {
+                subtitle: KI18n.i18nc("@info", "Uses the colors of the color scheme.")
+
+                contentItem: Controls.CheckBox {
+                    Layout.fillWidth: true
+                    objectName: "syntaxHighlightingSetting"
+                    text: KI18n.i18nc("@option:check", "Highlight common patterns in output")
+                    enabled: !root.appSettings.isSyntaxHighlightingImmutable
+                    checked: root.appSettings.syntaxHighlighting
+
+                    onToggled: {
+                        root.appSettings.syntaxHighlighting = checked;
+                        root.appSettings.save();
                     }
                 }
             }

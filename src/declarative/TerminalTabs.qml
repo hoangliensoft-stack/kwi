@@ -22,19 +22,6 @@ RowLayout {
     readonly property ListView view: tabBar.contentItem as ListView
     readonly property bool overflowing: count * Kirigami.Units.gridUnit * 8 > width
 
-    // Clip the selected tab's frame opening to the scrolled viewport.
-    readonly property real viewportLeft: tabBar.x + view.x
-    readonly property real currentTabX: {
-        const current = tabBar.currentItem;
-
-        if (!current)
-            return 0;
-
-        return dragHelper.local && dragHelper.tab === current ? dragHelper.tabX : current.x - view.contentX;
-    }
-    readonly property real selectedTabLeft: viewportLeft + Math.max(0, Math.min(view.width, currentTabX))
-    readonly property real selectedTabRight: viewportLeft + Math.max(0, Math.min(view.width, currentTabX + (tabBar.currentItem ? tabBar.currentItem.width : 0)))
-
     // originX remains the content's left edge in right-to-left layouts.
     readonly property real occupiedLeft: view.originX - view.contentX
     readonly property real occupiedRight: occupiedLeft + view.contentWidth
@@ -187,7 +174,7 @@ RowLayout {
         implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset, contentItem.implicitHeight + topPadding + bottomPadding)
         contentHeight: availableHeight
 
-        readonly property real tabWidth: Math.max(Kirigami.Units.gridUnit * 8, Math.min(Kirigami.Units.gridUnit * 14, width / Math.max(1, count)))
+        readonly property real tabWidth: Math.max(Kirigami.Units.gridUnit * 8, Math.min(Kirigami.Units.gridUnit * 10, width / Math.max(1, count)))
 
         function revealCurrent(): void {
             setCurrentIndex(root.sessions.currentIndex);
@@ -274,6 +261,44 @@ RowLayout {
                 onDragMoved: scenePosition => dragHelper.move(scenePosition)
                 onDragReleased: accepted => dragHelper.release(tabButton, accepted)
                 onNavigationRequested: key => tabBar.navigateKey(key)
+            }
+        }
+
+        // Accent line under the current tab. It lives in the list's content so it
+        // scrolls with the tabs, and slides when the current tab changes.
+        Rectangle {
+            id: currentIndicator
+
+            objectName: "terminalTabIndicator"
+            parent: root.view.contentItem
+            z: 3
+
+            readonly property Item tab: tabBar.currentItem
+            readonly property bool following: dragHelper.local && dragHelper.tab === tab
+            readonly property real inset: Kirigami.Units.smallSpacing * 2
+
+            visible: tab !== null
+            x: !tab ? 0 : (following ? dragHelper.tabX + root.view.contentX : tab.x) + inset
+            y: root.position === Controls.TabBar.Footer ? 0 : root.view.height - height
+            width: tab ? Math.max(0, tab.width - 2 * inset) : 0
+            height: 2
+            radius: height / 2
+            color: Kirigami.Theme.highlightColor
+
+            Behavior on x {
+                enabled: !currentIndicator.following
+
+                NumberAnimation {
+                    duration: Kirigami.Units.longDuration
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            Behavior on width {
+                NumberAnimation {
+                    duration: Kirigami.Units.longDuration
+                    easing.type: Easing.OutCubic
+                }
             }
         }
 

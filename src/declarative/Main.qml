@@ -759,37 +759,33 @@ Kirigami.ApplicationWindow {
                 Kirigami.Theme.colorSet: position === Controls.ToolBar.Header ? Kirigami.Theme.Header : Kirigami.Theme.Window
                 Kirigami.Theme.inherit: false
 
-                background: Rectangle {
-                    // Match qqc2-desktop-style's DefaultToolBarBackground minimum.
-                    implicitHeight: 40
-                    color: Kirigami.Theme.backgroundColor
+                // Blend the tab bar into the terminal: same surface, same text color.
+                readonly property bool followsTerminal: root.terminal && root.terminal.backgroundColor.valid && root.terminal.foregroundColor.valid
+                Kirigami.Theme.backgroundColor: followsTerminal ? root.terminal.backgroundColor : systemToolBarColors.Kirigami.Theme.backgroundColor
+                Kirigami.Theme.textColor: followsTerminal ? root.terminal.foregroundColor : systemToolBarColors.Kirigami.Theme.textColor
+
+                // The system's toolbar colors, used until the terminal reports its own.
+                Item {
+                    id: systemToolBarColors
+
+                    visible: false
+                    Kirigami.Theme.colorSet: terminalToolBar.position === Controls.ToolBar.Header ? Kirigami.Theme.Header : Kirigami.Theme.Window
+                    Kirigami.Theme.inherit: false
                 }
 
-                Item {
-                    id: tabFrame
+                background: Rectangle {
+                    // Compact minimum; the tabs and tool buttons set the height above it.
+                    implicitHeight: 34
+                    color: {
+                        const surface = Kirigami.Theme.backgroundColor;
 
-                    objectName: "terminalTabFrame"
-                    parent: terminalToolBar
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    y: terminalToolBar.position === Controls.ToolBar.Footer ? 0 : terminalToolBar.height - height
-                    Kirigami.AlignedSize.height: 1
-                    z: 1
-
-                    readonly property real dpr: typeof root.devicePixelRatio === "number" ? root.devicePixelRatio : Screen.devicePixelRatio
-                    readonly property real tabOrigin: terminalToolBar.contentItem.x + sessionTabs.x
-                    readonly property real gapStart: Math.max(0, Math.min(width, Math.round((tabOrigin + sessionTabs.selectedTabLeft) * dpr) / dpr))
-                    readonly property real gapEnd: Math.max(gapStart, Math.min(width, Math.round((tabOrigin + sessionTabs.selectedTabRight) * dpr) / dpr))
-
-                    Kirigami.Separator {
-                        width: tabFrame.gapStart
-                        height: tabFrame.height
+                        return terminalToolBar.followsTerminal ? Qt.rgba(surface.r, surface.g, surface.b, root.appSettings.backgroundOpacity) : surface;
                     }
 
-                    Kirigami.Separator {
-                        x: tabFrame.gapEnd
-                        width: tabFrame.width - x
-                        height: tabFrame.height
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: Kirigami.Units.longDuration
+                        }
                     }
                 }
 

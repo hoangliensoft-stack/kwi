@@ -512,6 +512,7 @@ public:
         QVector<Cell> cells;
         QRegion searchMatches;
         QRegion hoveredLink;
+        QList<TextHighlight> textHighlights; // Row-local cell coordinates.
         std::array<quint64, 2> identity{};
         quint64 version{0};
         int cursorColumn{-1};
@@ -717,6 +718,26 @@ public:
             for (int column{link.left()}; column <= link.right(); ++column) {
                 auto &cell = highlightedCells[column];
                 cell.underline = cell.underline == 1 || (!cell.underline && (cell.flags & Underline)) ? 2 : 1;
+            }
+        }
+
+        for (const auto &highlight : std::as_const(row.textHighlights)) {
+            for (int column{highlight.cells.left()}; column <= highlight.cells.right() && column < highlightedCells.size(); ++column) {
+                auto &cell = highlightedCells[column];
+                // Keep an explicit underline color; otherwise it follows the text.
+                if (cell.underlineColor == cell.foreground) {
+                    cell.underlineColor = highlight.foreground;
+                }
+
+                cell.foreground = highlight.foreground;
+
+                if (highlight.bold) {
+                    cell.flags |= Bold;
+                }
+
+                if (highlight.faint) {
+                    cell.flags |= Faint;
+                }
             }
         }
 
@@ -1209,6 +1230,7 @@ void TerminalNode::prepare(const Frame &frame, const Options &options)
     }
 
     bool cursorContentChanged{false};
+    auto highlight = options.textHighlights.cbegin();
 
     for (int y{0}; y < d->rows.size(); ++y) {
         auto &row = d->rows[y]; // clazy:exclude=detaching-member
@@ -1217,11 +1239,22 @@ void TerminalNode::prepare(const Frame &frame, const Options &options)
         const bool cursorRowChanged{row.cursorColumn != cursorColumn || (cursorChanged && cursorColumn >= 0)};
         const QRegion matches{options.searchMatches.intersected(QRect(0, y, int(frame.rows[y].size()), 1)).translated(0, -y)};
         const QRegion link{options.hoveredLink.intersected(QRect(0, y, int(frame.rows[y].size()), 1)).translated(0, -y)};
+        QList<TextHighlight> highlights;
+
+        for (; highlight != options.textHighlights.cend() && highlight->cells.top() <= y; ++highlight) {
+            if (highlight->cells.top() == y) {
+                auto local = *highlight;
+                local.cells.translate(0, -y);
+                highlights += local;
+            }
+        }
 
         if (appearanceChanged || cursorRowChanged || (blinkChanged && row.blink) || row.searchMatches != matches || row.hoveredLink != link
+            || row.textHighlights != highlights
             || ((version != row.version || row.cells.isEmpty()) && row.cells != frame.rows[y])) {
             row.searchMatches = matches;
             row.hoveredLink = link;
+            row.textHighlights = std::move(highlights);
             d->rebuildRow(row, frame.rows[y], cursorColumn);
             cursorContentChanged |= y == frame.cursor.y();
         }

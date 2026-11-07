@@ -36,6 +36,7 @@ public:
         QRegion hoveredLink; // Viewport cell coordinates.
         QColor searchForeground;
         QColor searchBackground;
+        QList<TextHighlight> textHighlights; // Sorted by row.
         QString preedit;
         QList<QInputMethodEvent::Attribute> preeditAttributes;
     };

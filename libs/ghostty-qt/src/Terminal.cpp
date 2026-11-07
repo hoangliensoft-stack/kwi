@@ -576,6 +576,7 @@ public:
                 cell.foreground = rgb(fg);
                 cell.background = rgb(bg);
                 cell.defaultBackground = !explicitBackground && !style.inverse;
+                cell.defaultForeground = style.fg_color.tag == GHOSTTY_STYLE_COLOR_NONE && !style.inverse;
                 cell.underlineColor = style.underline_color.tag == GHOSTTY_STYLE_COLOR_RGB ? rgb(style.underline_color.value.rgb)
                     : style.underline_color.tag == GHOSTTY_STYLE_COLOR_PALETTE             ? rgb(colors.palette[style.underline_color.value.palette])
                                                                                            : cell.foreground;

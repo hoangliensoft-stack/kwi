@@ -38,7 +38,8 @@ TerminalSettings::TerminalSettings(QObject *parent)
                                 &TerminalPreferences::remoteTitleFormatChanged,   &TerminalPreferences::windowTitleFromApplicationChanged,
                                 &TerminalPreferences::cursorStyleChanged,         &TerminalPreferences::cursorBlinkingChanged,
                                 &TerminalPreferences::confirmCloseRunningChanged, &TerminalPreferences::confirmMultilinePasteChanged,
-                                &TerminalPreferences::copyOnSelectChanged,        &TerminalPreferences::requireCtrlForLinksChanged};
+                                &TerminalPreferences::copyOnSelectChanged,        &TerminalPreferences::requireCtrlForLinksChanged,
+                                &TerminalPreferences::syntaxHighlightingChanged,  &TerminalPreferences::terminalPaddingChanged};
 
     for (const auto signal : changeSignals) {
         // Every entry is a typed signal; Clazy cannot resolve the loop variable.

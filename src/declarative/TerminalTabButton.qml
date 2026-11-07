@@ -63,6 +63,34 @@ Controls.TabButton {
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset, implicitContentWidth + leftPadding + rightPadding)
     // Reserve progress space even when hidden to keep the tab height stable.
     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset, implicitContentHeight + topPadding + bottomPadding, titleLabel.implicitHeight + 2 * (progress.height + progress.anchors.bottomMargin) + Kirigami.Units.smallSpacing)
+    hoverEnabled: true
+    topInset: Kirigami.Units.smallSpacing / 2
+    bottomInset: Kirigami.Units.smallSpacing / 2
+
+    // A flat tab. The tab bar's sliding accent line marks the current tab.
+    background: Rectangle {
+        radius: Kirigami.Units.cornerRadius
+        color: control.Kirigami.Theme.textColor
+        opacity: control.pressed || control.dragging ? 0.12 : control.hovered && !control.checked ? 0.07 : 0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
+                easing.type: Easing.OutCubic
+            }
+        }
+    }
+
+    // Dim inactive tabs so the current one reads first.
+    property real contentOpacity: checked ? 1 : hovered ? 0.85 : 0.6
+
+    Behavior on contentOpacity {
+        NumberAnimation {
+            duration: Kirigami.Units.shortDuration
+            easing.type: Easing.OutCubic
+        }
+    }
+
     Accessible.role: Accessible.PageTab
     Accessible.name: session.attention ? KI18n.i18nc("@info:accessibility", "%1, needs attention", session.title) : session.title
     Accessible.description: progressDescription
@@ -84,6 +112,7 @@ Controls.TabButton {
             Layout.leftMargin: Kirigami.Units.smallSpacing * 2
             Layout.preferredWidth: Kirigami.Units.iconSizes.small
             Layout.preferredHeight: Kirigami.Units.iconSizes.small
+            opacity: control.contentOpacity
             source: control.session.iconName
         }
 
@@ -95,6 +124,8 @@ Controls.TabButton {
             Layout.leftMargin: control.showStatusIcons ? 0 : Kirigami.Units.smallSpacing * 2
             text: control.session.title
             font: control.font
+            color: control.Kirigami.Theme.textColor
+            opacity: control.contentOpacity
             textFormat: Text.PlainText
             elide: Text.ElideRight
         }
@@ -110,6 +141,17 @@ Controls.TabButton {
             Layout.alignment: Qt.AlignVCenter
             Layout.rightMargin: Kirigami.Units.smallSpacing * 2
             selected: control.checked
+            // Keep the space reserved so titles do not reflow while the button fades.
+            readonly property bool shown: control.checked || control.hovered
+            opacity: shown ? 1 : 0
+            enabled: shown
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Kirigami.Units.shortDuration
+                    easing.type: Easing.OutCubic
+                }
+            }
             // Match QTabBar by leaving keyboard access to the Close Tab action.
             focusPolicy: Qt.NoFocus
 
@@ -133,8 +175,8 @@ Controls.TabButton {
         anchors.bottom: parent.bottom
         anchors.leftMargin: Kirigami.Units.smallSpacing * 2
         anchors.rightMargin: Kirigami.Units.smallSpacing * 2
-        anchors.bottomMargin: Kirigami.Units.smallSpacing
-        height: Kirigami.Units.smallSpacing
+        anchors.bottomMargin: Kirigami.Units.smallSpacing / 2
+        height: Kirigami.Units.smallSpacing / 2
         visible: control.hasProgress
         from: 0
         to: 100

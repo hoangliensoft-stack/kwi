@@ -4,9 +4,11 @@
 #pragma once
 
 #include "Session.h"
+#include "TextHighlighter_p.h"
 #include "kwiterminal_export.h"
 #include <QColor>
 #include <QFont>
+#include <QHash>
 #include <QInputMethodEvent>
 #include <QList>
 #include <QMetaObject>
@@ -146,6 +148,22 @@ class KWI_TERMINAL_EXPORT TerminalView : public QQuickItem
      * process can override this through escape sequences.
      */
     Q_PROPERTY(bool cursorBlinking READ cursorBlinking WRITE setCursorBlinking NOTIFY appearanceChanged)
+    /*!
+     * \qmlproperty real TerminalView::contentPadding
+     * The space between the terminal grid and the view's edges, in logical
+     * pixels. The default is 1. Values are clamped to 0 to 64 and rounded to
+     * whole physical pixels. The padding uses the terminal's default background.
+     */
+    Q_PROPERTY(qreal contentPadding READ contentPadding WRITE setContentPadding NOTIFY appearanceChanged)
+    /*!
+     * \qmlproperty bool TerminalView::syntaxHighlighting
+     * Whether common tokens in terminal output, such as log levels, URLs, paths,
+     * addresses, dates and numbers, are colored using the color scheme's ANSI
+     * palette. Only text drawn in the default foreground color is affected, so
+     * colors chosen by the terminal process are preserved. Highlighting does not
+     * change the terminal contents. The default is false.
+     */
+    Q_PROPERTY(bool syntaxHighlighting READ syntaxHighlighting WRITE setSyntaxHighlighting NOTIFY appearanceChanged)
     /*!
      * \qmlproperty bool TerminalView::confirmMultilinePaste
      * Whether a paste containing a newline or carriage return emits
@@ -293,6 +311,10 @@ public:
     void setCursorStyle(const QString &style);
     [[nodiscard]] bool cursorBlinking() const;
     void setCursorBlinking(bool blinking);
+    [[nodiscard]] qreal contentPadding() const;
+    void setContentPadding(qreal padding);
+    [[nodiscard]] bool syntaxHighlighting() const;
+    void setSyntaxHighlighting(bool enabled);
     [[nodiscard]] bool requireCtrlForLinks() const;
     void setRequireCtrlForLinks(bool required);
 
@@ -515,6 +537,7 @@ private:
     void resizeTerminal();
     void updateCursorDefaults();
     void updateBlinkTimers();
+    void updateTextHighlights();
     void resetCursorBlink();
 
     void resetPreedit();
@@ -542,6 +565,9 @@ private:
 
     TerminalSearch *m_search;
     QRegion m_searchMatches;
+    QList<GhosttyQt::TextHighlight> m_textHighlights;
+    QHash<QString, QList<TextHighlightSpan>> m_textHighlightCache;
+    QVector<QRgb> m_highlightPalette;
     QString m_preedit;
     QList<QInputMethodEvent::Attribute> m_preeditAttributes;
 
@@ -563,6 +589,7 @@ private:
 
     qreal m_cellWidth{10};
     qreal m_cellHeight{20};
+    qreal m_contentPadding{Padding};
     qreal m_padding{Padding};
     qreal m_zoom{0};
     qreal m_pointSize{0};
@@ -575,6 +602,7 @@ private:
     QSet<quint64> m_pressedKeys;
 
     bool m_cursorBlinking{false};
+    bool m_syntaxHighlighting{false};
     bool m_cursorBlinkVisible{true};
     bool m_textBlinkVisible{true};
     bool m_hasBlinkingText{false};

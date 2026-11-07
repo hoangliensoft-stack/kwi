@@ -23,6 +23,14 @@
             <min>0.0</min>
             <max>1.0</max>
         </entry>
+        <entry name="terminalPadding" key="TerminalPadding" type="Int">
+            <default>8</default>
+            <min>0</min>
+            <max>32</max>
+        </entry>
+        <entry name="syntaxHighlighting" key="SyntaxHighlighting" type="Bool">
+            <default>false</default>
+        </entry>
         <entry name="backgroundBlur" key="BackgroundBlur" type="Bool">
             <default>false</default>
         </entry>
