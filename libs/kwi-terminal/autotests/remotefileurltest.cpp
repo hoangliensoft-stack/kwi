@@ -17,7 +17,33 @@ private Q_SLOTS:
     void includesNonDefaultPort();
     void bracketsIpv6Hosts();
     void rejectsMissingHost();
+    void readsDirectoryFromTitle_data();
+    void readsDirectoryFromTitle();
 };
+
+void RemoteFileUrlTest::readsDirectoryFromTitle_data()
+{
+    QTest::addColumn<QString>("title");
+    QTest::addColumn<QString>("expected");
+
+    QTest::newRow("absolute") << "zk@server: /opt/frp_0.58.0_linux_amd64" << "/opt/frp_0.58.0_linux_amd64";
+    QTest::newRow("home") << "zk@server: ~" << "/home/zk";
+    QTest::newRow("below home") << "zk@server: ~/projects/web app" << "/home/zk/projects/web app";
+    QTest::newRow("root home") << "root@server: ~/.ssh" << "/root/.ssh";
+    QTest::newRow("chroot prefix") << "(jail)deploy@build-01.example.org: /srv" << "/srv";
+    QTest::newRow("program title") << "vim nginx.conf" << QString();
+    QTest::newRow("no space after colon") << "zk@server:/opt" << QString();
+    QTest::newRow("relative") << "zk@server: opt" << QString();
+    QTest::newRow("other user home") << "zk@server: ~alice" << QString();
+}
+
+void RemoteFileUrlTest::readsDirectoryFromTitle()
+{
+    QFETCH(QString, title);
+    QFETCH(QString, expected);
+
+    QCOMPARE(remoteDirectoryFromTitle(title), expected);
+}
 
 void RemoteFileUrlTest::resolvesPaths_data()
 {

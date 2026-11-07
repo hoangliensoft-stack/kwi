@@ -41,6 +41,10 @@ struct SshConfigurationQuery {
 // the absolute remote directory, and ~/ against the conventional home directory.
 // Returns an empty URL when the path cannot be resolved.
 [[nodiscard]] KWI_TERMINAL_EXPORT QUrl remoteFileUrl(const SshMetadata &destination, const QString &directory, const QString &path);
+// Returns the absolute directory from a "user@host: directory" window title, which
+// Debian and Ubuntu shells set by default, or an empty string for other titles.
+// ~ expands to the title user's conventional home directory.
+[[nodiscard]] KWI_TERMINAL_EXPORT QString remoteDirectoryFromTitle(const QString &title);
 
 class KWI_TERMINAL_EXPORT SshMetadataResolver final : public QObject
 {

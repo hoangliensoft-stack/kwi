@@ -1158,6 +1158,9 @@ Kirigami.ApplicationWindow {
 
                     onContextMenuRequested: position => {
                         terminalMenu.linkUrl = terminal.hoveredLink;
+                        // Remember what was clicked: output can redraw before a menu item is chosen.
+                        terminalMenu.selectedText = terminal.selectedText;
+                        terminalMenu.pathUnderPointer = terminal.pathAtPosition(position);
                         webShortcuts.refresh(terminal.selectedText);
                         terminalMenu.popup(terminal, position.x, position.y);
                     }
@@ -1172,6 +1175,17 @@ Kirigami.ApplicationWindow {
                         modal: true
                         dim: false
                         property url linkUrl
+                        property string selectedText
+                        property string pathUnderPointer
+                        // Server files are opened with Open Remote File… and Ctrl+click instead.
+                        readonly property bool showsLinkActions: linkUrl.toString().length > 0 && !linkUrl.toString().startsWith("sftp:")
+
+                        // The selection when there is one, otherwise the path that was right-clicked.
+                        function remotePathSuggestion(): string {
+                            const selection = selectedText.trim();
+
+                            return selection.length > 0 && !selection.includes("\n") ? selection : pathUnderPointer;
+                        }
 
                         WebShortcutModel {
                             id: webShortcuts
@@ -1180,10 +1194,9 @@ Kirigami.ApplicationWindow {
                         }
 
                         Controls.MenuItem {
-                            // Links to SSH server files open in a local application that saves them back.
-                            text: terminalMenu.linkUrl.toString().startsWith("sftp:") ? KI18n.i18nc("@action", "Open on This Computer") : KI18n.i18nc("@action", "Open Link")
+                            text: KI18n.i18nc("@action", "Open Link")
                             icon.name: "document-open"
-                            visible: terminalMenu.linkUrl.toString().length > 0
+                            visible: terminalMenu.showsLinkActions
 
                             onTriggered: root.desktopIntegration.openUrl(terminalMenu.linkUrl)
                         }
@@ -1191,13 +1204,13 @@ Kirigami.ApplicationWindow {
                         Controls.MenuItem {
                             text: KI18n.i18nc("@action", "Copy Link")
                             icon.name: "edit-copy"
-                            visible: terminalMenu.linkUrl.toString().length > 0
+                            visible: terminalMenu.showsLinkActions
 
                             onTriggered: root.terminal.copyLink(terminalMenu.linkUrl)
                         }
 
                         Controls.MenuSeparator {
-                            visible: terminalMenu.linkUrl.toString().length > 0
+                            visible: terminalMenu.showsLinkActions
                         }
 
                         Controls.MenuItem {
@@ -1248,7 +1261,7 @@ Kirigami.ApplicationWindow {
                             visible: root.currentSession !== null && root.currentSession.hasSshInfo
                             height: visible ? implicitHeight : 0
 
-                            onTriggered: remoteFileDialog.openFor(root.currentSession, root.terminal.selectedText)
+                            onTriggered: remoteFileDialog.openFor(root.currentSession, terminalMenu.remotePathSuggestion())
                         }
                     }
                 }
@@ -1353,8 +1366,14 @@ Kirigami.ApplicationWindow {
             listings = {};
             pendingDirectory = "";
             completionMessage = "";
-            const selection = selectedText.trim();
+            let selection = selectedText.trim();
             const directory = session.remoteWorkingDirectory;
+
+            // Show a relative path in full when the shell reports its folder.
+            if (selection.length > 0 && !selection.startsWith("/") && !selection.startsWith("~") && directory.length > 0) {
+                selection = (directory.endsWith("/") ? directory : directory + "/") + selection;
+            }
+
             // Without the shell's current folder, start in the home folder.
             remotePathField.text = selection.length > 0 && !selection.includes("\n") ? selection
                 : directory.length > 0 ? (directory.endsWith("/") ? directory : directory + "/")

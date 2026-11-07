@@ -351,6 +351,14 @@ public:
      * or one without a scheme leaves the clipboard unchanged.
      */
     Q_INVOKABLE void copyLink(const QUrl &url);
+    /*!
+     * \qmlmethod string TerminalView::pathAtPosition(point position)
+     * Returns the path-like text under \a position, in item coordinates: a
+     * quoted string or a run of text without whitespace, without trailing
+     * punctuation or a :line[:column] suffix. Returns an empty string when
+     * there is no text there.
+     */
+    [[nodiscard]] Q_INVOKABLE QString pathAtPosition(QPointF position) const;
 
     /*!
      * \qmlmethod void TerminalView::copy()
@@ -547,6 +555,7 @@ private:
     [[nodiscard]] QPoint glyphStart(QPoint cell) const;
     [[nodiscard]] QPoint cellAt(QPointF position) const;
     [[nodiscard]] QUrl linkAtPosition(QPointF position, QRegion *cells = nullptr) const;
+    [[nodiscard]] QString logicalLineAt(QPoint cell, qsizetype *offset, int *firstRow, int *lastRow) const;
     bool reportMouse(QMouseEvent *event, bool release, bool motion);
     void sendMouse(GhosttyQt::MouseEvent event);
     void updateSelection(GhosttyQt::SelectionEvent::Type type, QPointF position, quint64 timestamp = 0);

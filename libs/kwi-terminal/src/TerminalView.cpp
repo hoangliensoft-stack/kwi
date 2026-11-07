@@ -1050,6 +1050,83 @@ QUrl TerminalView::hoveredLink() const
     return m_hoveredLink;
 }
 
+QString TerminalView::logicalLineAt(QPoint cell, qsizetype *offset, int *firstRow, int *lastRow) const
+{
+    // Join soft-wrapped rows so text that wraps at the edge reads as one line.
+    int first{cell.y()};
+    int last{cell.y()};
+
+    while (first > 0 && m_frame.rowWrapped.value(first - 1)) {
+        --first;
+    }
+
+    while (last + 1 < m_frame.rows.size() && m_frame.rowWrapped.value(last)) {
+        ++last;
+    }
+
+    QString line;
+
+    for (int y{first}; y <= last; ++y) {
+        const auto &row = m_frame.rows[y];
+
+        for (qsizetype column{0}; column < row.size(); ++column) {
+            if (y == cell.y() && column == cell.x()) {
+                *offset = line.size();
+            }
+
+            if (row[column].width != 0) {
+                line += row[column].text.isEmpty() ? QStringLiteral(" ") : row[column].text;
+            }
+        }
+    }
+
+    *firstRow = first;
+    *lastRow = last;
+
+    return line;
+}
+
+QString TerminalView::pathAtPosition(QPointF position) const
+{
+    if (!m_session || !m_session->terminal() || position.x() < m_padding || position.y() < m_padding
+        || position.x() >= m_padding + m_frame.columns * m_cellWidth || position.y() >= m_padding + m_frame.rows.size() * m_cellHeight) {
+        return {};
+    }
+
+    const QPoint cell{glyphStart(cellAt(position))};
+
+    if (cell.y() >= m_frame.rows.size()) {
+        return {};
+    }
+
+    qsizetype offset{0};
+    int firstRow{0};
+    int lastRow{0};
+    const QString line{logicalLineAt(cell, &offset, &firstRow, &lastRow)};
+
+    // Same tokens as path links: quoted text, or a run without whitespace.
+    static const QRegularExpression tokens(QStringLiteral(R"re("([^"]+)"|'([^']+)'|([^\s<>"']+))re"));
+    static const QRegularExpression location(QStringLiteral(R"(:[0-9]+(?::[0-9]+)?$)"));
+    auto matches = tokens.globalMatch(line);
+
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        const int capture{match.capturedStart(1) >= 0 ? 1 : match.capturedStart(2) >= 0 ? 2 : 3};
+        const qsizetype start{match.capturedStart(capture)};
+        QString token{capture == 3 ? trimLinkPunctuation(match.captured(capture)) : match.captured(capture)};
+
+        if (offset < start || offset >= start + token.size()) {
+            continue;
+        }
+
+        token.remove(location);
+
+        return token;
+    }
+
+    return {};
+}
+
 QUrl TerminalView::linkAtPosition(QPointF position, QRegion *cells) const
 {
     if (!m_session || !m_session->terminal() || position.x() < m_padding || position.y() < m_padding
@@ -1097,32 +1174,10 @@ QUrl TerminalView::linkAtPosition(QPointF position, QRegion *cells) const
         return {};
     }
 
-    QString line;
     qsizetype offset{0};
-    int firstRow{cell.y()};
-    int lastRow{cell.y()};
-
-    while (firstRow > 0 && m_frame.rowWrapped.value(firstRow - 1)) {
-        --firstRow;
-    }
-
-    while (lastRow + 1 < m_frame.rows.size() && m_frame.rowWrapped.value(lastRow)) {
-        ++lastRow;
-    }
-
-    for (int y{firstRow}; y <= lastRow; ++y) {
-        const auto &row = m_frame.rows[y];
-
-        for (qsizetype column{0}; column < row.size(); ++column) {
-            if (y == cell.y() && column == cell.x()) {
-                offset = line.size();
-            }
-
-            if (row[column].width != 0) {
-                line += row[column].text.isEmpty() ? QStringLiteral(" ") : row[column].text;
-            }
-        }
-    }
+    int firstRow{0};
+    int lastRow{0};
+    const QString line{logicalLineAt(cell, &offset, &firstRow, &lastRow)};
 
     const auto matches = textLinks(line, m_session->workingDirectory(), m_frame.rowWrapped.value(lastRow), remotePathResolver(m_session), offset);
 

@@ -46,6 +46,7 @@ Session::Session(QObject *parent)
 {
     connect(m_sshMetadata.get(), &SshMetadataResolver::changed, this, &Session::sshInfoChanged);
     connect(m_sshMetadata.get(), &SshMetadataResolver::changed, this, &Session::remoteWorkingDirectoryChanged);
+    connect(this, &Session::applicationTitleChanged, this, &Session::remoteWorkingDirectoryChanged);
     m_terminal = std::make_unique<GhosttyQt::Terminal>(m_columns, m_rows, m_scrollbackLines);
 
     if (!m_terminal->isValid()) {
@@ -546,14 +547,14 @@ QString Session::remoteWorkingDirectory() const
     const QString host{url.host()};
 
     // Only a directory reported by another host belongs to the SSH server.
-    if (!url.isLocalFile() || host.isEmpty() || host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0
-        || host.compare(m_localHostName, Qt::CaseInsensitive) == 0) {
-        return {};
+    if (url.isLocalFile() && !host.isEmpty() && host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) != 0
+        && host.compare(m_localHostName, Qt::CaseInsensitive) != 0 && url.path().startsWith(QLatin1Char('/'))) {
+        return url.path();
     }
 
-    const QString path{url.path()};
-
-    return path.startsWith(QLatin1Char('/')) ? path : QString{};
+    // Shells that do not report OSC 7, such as Debian and Ubuntu's default
+    // bash, still show the directory in the window title.
+    return m_hasApplicationTitle ? remoteDirectoryFromTitle(m_applicationTitle) : QString{};
 }
 
 QUrl Session::remoteFileUrl(const QString &path) const

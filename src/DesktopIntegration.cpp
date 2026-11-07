@@ -204,6 +204,27 @@ void DesktopIntegration::openCurrentDirectory(TerminalSession *session)
         return;
     }
 
+    // In an SSH session, open the server's folder: mounted through KIO or
+    // GVfs, its files open and save in place like local ones.
+    if (session->hasSshInfo()) {
+        const QString remoteDirectory{session->remoteWorkingDirectory()};
+        QUrl url{session->remoteFileUrl(remoteDirectory.isEmpty() ? QStringLiteral("~") : remoteDirectory)};
+
+        if (url.isEmpty()) {
+            setError(i18n("The server's current folder is not known."));
+
+            return;
+        }
+
+        if (!url.path().endsWith(QLatin1Char('/'))) {
+            url.setPath(url.path() + QLatin1Char('/'));
+        }
+
+        openUrl(url);
+
+        return;
+    }
+
     const QString directory{session->workingDirectory()};
 
     if (directory.isEmpty() || (!KSandbox::isFlatpak() && !QDir(directory).exists())) {

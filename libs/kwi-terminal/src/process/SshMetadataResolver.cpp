@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QHostAddress>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStringView>
 #include <QThread>
 #include <QtConcurrentRun>
@@ -213,6 +214,28 @@ QUrl remoteFileUrl(const SshMetadata &destination, const QString &directory, con
     url.setPath(QDir::cleanPath(absolute));
 
     return url.isValid() ? url : QUrl{};
+}
+
+QString remoteDirectoryFromTitle(const QString &title)
+{
+    // Debian's default bashrc: "\u@\h: \w", optionally prefixed with "(chroot)".
+    static const QRegularExpression pattern(QStringLiteral(R"(^(?:\([^)]*\))?([a-z_][a-z0-9_.-]*\$?)@[A-Za-z0-9.-]+: (/.*|~(?:/.*)?)$)"));
+    const auto match = pattern.match(title);
+
+    if (!match.hasMatch()) {
+        return {};
+    }
+
+    const QString user{match.captured(1)};
+    const QString directory{match.captured(2)};
+
+    if (directory.startsWith(QLatin1Char('/'))) {
+        return directory;
+    }
+
+    const QString home{user == u"root" ? QStringLiteral("/root") : QStringLiteral("/home/") + user};
+
+    return home + directory.mid(1);
 }
 
 SshMetadataResolver::SshMetadataResolver(QObject *parent)

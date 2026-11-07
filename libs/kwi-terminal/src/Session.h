@@ -223,8 +223,9 @@ class KWI_TERMINAL_EXPORT Session : public QObject
      * \qmlproperty string Session::remoteWorkingDirectory
      * \readonly
      * The SSH server's working directory, as reported by its shell through
-     * OSC 7. It is empty when hasSshInfo is false or the remote shell does
-     * not report its directory.
+     * OSC 7, or else read from a "user@host: directory" window title as set
+     * by Debian and Ubuntu's default shell configuration. It is empty when
+     * hasSshInfo is false or the remote shell reports neither.
      *
      * \sa remoteFileUrl()
      */
