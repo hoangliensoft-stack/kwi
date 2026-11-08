@@ -264,26 +264,46 @@ RowLayout {
             }
         }
 
-        // Accent line under the current tab. It lives in the list's content so it
-        // scrolls with the tabs, and slides when the current tab changes.
+        // Accent gradient behind the current tab, fading from left to right. It lives
+        // in the list's content so it scrolls with the tabs, and slides when the
+        // current tab changes.
         Rectangle {
             id: currentIndicator
 
             objectName: "terminalTabIndicator"
             parent: root.view.contentItem
-            z: 3
+            // Above the list's highlight, below the tab delegates.
+            z: 0.5
 
             readonly property Item tab: tabBar.currentItem
             readonly property bool following: dragHelper.local && dragHelper.tab === tab
-            readonly property real inset: Kirigami.Units.smallSpacing * 2
+            readonly property color accent: Kirigami.Theme.highlightColor
 
             visible: tab !== null
-            x: !tab ? 0 : (following ? dragHelper.tabX + root.view.contentX : tab.x) + inset
-            y: root.position === Controls.TabBar.Footer ? 0 : root.view.height - height
-            width: tab ? Math.max(0, tab.width - 2 * inset) : 0
-            height: 2
-            radius: height / 2
-            color: Kirigami.Theme.highlightColor
+            x: !tab ? 0 : following ? dragHelper.tabX + root.view.contentX : tab.x
+            y: tab ? tab.y + tab.topInset : 0
+            width: tab ? tab.width : 0
+            height: tab ? Math.max(0, tab.height - tab.topInset - tab.bottomInset) : 0
+            radius: Kirigami.Units.cornerRadius
+
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+
+                GradientStop {
+                    position: 0
+                    color: Qt.rgba(currentIndicator.accent.r, currentIndicator.accent.g, currentIndicator.accent.b, 0.32)
+                }
+
+                GradientStop {
+                    position: 0.55
+                    color: Qt.rgba(currentIndicator.accent.r, currentIndicator.accent.g, currentIndicator.accent.b, 0.14)
+                }
+
+                GradientStop {
+                    position: 1
+                    color: Qt.rgba(currentIndicator.accent.r, currentIndicator.accent.g, currentIndicator.accent.b, 0.03)
+                }
+            }
 
             Behavior on x {
                 enabled: !currentIndicator.following

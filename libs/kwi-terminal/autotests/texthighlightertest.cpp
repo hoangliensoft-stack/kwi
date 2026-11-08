@@ -55,6 +55,11 @@ private Q_SLOTS:
         QTest::newRow("database codes") << u"PLS-00201: identifier must be declared"_s << QStringList{u"PLS-00201"_s};
         QTest::newRow("exception names need a suffix") << u"Error in MyErrorHandler"_s << QStringList{u"Error"_s};
         QTest::newRow("no numbers inside words") << u"utf8 x86_64 file2.txt"_s << QStringList{};
+        QTest::newRow("json payload") << u"Payload: {\"ts\" : 17, \"ok\": true, \"d\": {\"t\": -19.8e2, \"at\": \"2026-11-08 /x error\", \"n\": null}, \"a\": [1, \"b\"]}"_s
+                                      << QStringList{u"\"ts\""_s, u"17"_s, u"\"ok\""_s, u"true"_s, u"\"d\""_s, u"\"t\""_s, u"-19.8e2"_s,
+                                                     u"\"at\""_s, u"\"2026-11-08 /x error\""_s, u"\"n\""_s, u"null"_s, u"\"a\""_s, u"1"_s, u"\"b\""_s};
+        QTest::newRow("escaped quote in json") << u"{\"k\": \"a\\\"b\"}"_s << QStringList{u"\"k\""_s, u"\"a\\\"b\""_s};
+        QTest::newRow("not json") << u"wsp[28994]: [DB-Listen] {a: 1} {\"k\": 1"_s << QStringList{};
         QTest::newRow("keywords need boundaries") << u"stderr okay errored"_s << QStringList{};
     }
 
@@ -75,6 +80,17 @@ private Q_SLOTS:
         for (qsizetype i{1}; i < spans.size(); ++i) {
             QVERIFY(spans[i - 1].start + spans[i - 1].length <= spans[i].start);
         }
+    }
+
+    void colorsJson()
+    {
+        const auto spans = textHighlightSpans(u"{\"k\": \"v\", \"n\": 1, \"b\": false}"_s);
+        QCOMPARE(spans.size(), 6);
+        QCOMPARE(spans[0].color, 4);
+        QVERIFY(spans[0].bold);
+        QCOMPARE(spans[1].color, 2);
+        QCOMPARE(spans[3].color, 3);
+        QCOMPARE(spans[5].color, 5);
     }
 
     void assignsPaletteColors()

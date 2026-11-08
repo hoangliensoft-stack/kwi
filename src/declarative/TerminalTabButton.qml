@@ -67,7 +67,7 @@ Controls.TabButton {
     topInset: Kirigami.Units.smallSpacing / 2
     bottomInset: Kirigami.Units.smallSpacing / 2
 
-    // A flat tab. The tab bar's sliding accent line marks the current tab.
+    // A flat tab. The tab bar's sliding accent gradient marks the current tab.
     background: Rectangle {
         radius: Kirigami.Units.cornerRadius
         color: control.Kirigami.Theme.textColor

@@ -77,12 +77,257 @@ const QList<Rule> &rules()
 
     return rules;
 }
+
+// Recognizes JSON objects and arrays embedded in a line, such as log payloads.
+class JsonScanner
+{
+public:
+    explicit JsonScanner(QStringView text)
+        : m_text{text}
+    {
+    }
+
+    // Parses a value starting at \a start. On success returns the end offset
+    // and appends its token spans.
+    qsizetype scan(qsizetype start, QList<TextHighlightSpan> &spans)
+    {
+        m_position = start;
+        m_tokens.clear();
+        m_hasString = false;
+
+        if (!value(0) || !m_hasString) {
+            return -1;
+        }
+
+        spans += m_tokens;
+
+        return m_position;
+    }
+
+private:
+    static constexpr int MaximumDepth{64};
+
+    QChar peek() const
+    {
+        return m_position < m_text.size() ? m_text[m_position] : QChar{};
+    }
+
+    void skipSpace()
+    {
+        while (m_position < m_text.size() && (m_text[m_position] == u' ' || m_text[m_position] == u'\t')) {
+            ++m_position;
+        }
+    }
+
+    void token(qsizetype start, int color, bool bold = false)
+    {
+        m_tokens += {start, m_position - start, color, bold, false};
+    }
+
+    bool string(bool key)
+    {
+        const qsizetype start{m_position++};
+
+        while (m_position < m_text.size()) {
+            const QChar c{m_text[m_position++]};
+
+            if (c == u'"') {
+                token(start, key ? Blue : Green, key);
+                m_hasString = true;
+
+                return true;
+            }
+
+            if (c == u'\\') {
+                if (m_position == m_text.size()) {
+                    return false;
+                }
+
+                ++m_position;
+            } else if (c.unicode() < 0x20) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    bool digits()
+    {
+        const qsizetype start{m_position};
+
+        while (m_position < m_text.size() && m_text[m_position].isDigit() && m_text[m_position].unicode() < 0x80) {
+            ++m_position;
+        }
+
+        return m_position > start;
+    }
+
+    bool number()
+    {
+        const qsizetype start{m_position};
+
+        if (peek() == u'-') {
+            ++m_position;
+        }
+
+        if (!digits()) {
+            return false;
+        }
+
+        if (peek() == u'.') {
+            ++m_position;
+
+            if (!digits()) {
+                return false;
+            }
+        }
+
+        if (peek() == u'e' || peek() == u'E') {
+            ++m_position;
+
+            if (peek() == u'+' || peek() == u'-') {
+                ++m_position;
+            }
+
+            if (!digits()) {
+                return false;
+            }
+        }
+
+        token(start, Yellow);
+
+        return true;
+    }
+
+    bool literal()
+    {
+        for (const QStringView word : {QStringView{u"true"}, QStringView{u"false"}, QStringView{u"null"}}) {
+            if (m_text.sliced(m_position).startsWith(word)) {
+                const qsizetype start{m_position};
+                m_position += word.size();
+                token(start, Magenta);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool container(int depth, QChar close)
+    {
+        ++m_position;
+        skipSpace();
+
+        if (peek() == close) {
+            ++m_position;
+
+            return true;
+        }
+
+        while (true) {
+            if (close == u'}') {
+                if (peek() != u'"' || !string(true)) {
+                    return false;
+                }
+
+                skipSpace();
+
+                if (peek() != u':') {
+                    return false;
+                }
+
+                ++m_position;
+                skipSpace();
+            }
+
+            if (!value(depth + 1)) {
+                return false;
+            }
+
+            skipSpace();
+
+            if (peek() == close) {
+                ++m_position;
+
+                return true;
+            }
+
+            if (peek() != u',') {
+                return false;
+            }
+
+            ++m_position;
+            skipSpace();
+        }
+    }
+
+    bool value(int depth)
+    {
+        if (depth > MaximumDepth) {
+            return false;
+        }
+
+        const QChar c{peek()};
+
+        if (c == u'{') {
+            return container(depth, u'}');
+        }
+
+        if (c == u'[') {
+            return container(depth, u']');
+        }
+
+        // Only containers start a JSON value in free text.
+        if (depth == 0) {
+            return false;
+        }
+
+        if (c == u'"') {
+            return string(false);
+        }
+
+        if (c == u'-' || (c.isDigit() && c.unicode() < 0x80)) {
+            return number();
+        }
+
+        return literal();
+    }
+
+    QStringView m_text;
+    qsizetype m_position{0};
+    QList<TextHighlightSpan> m_tokens;
+    bool m_hasString{false};
+};
 }
 
 QList<TextHighlightSpan> textHighlightSpans(QStringView line)
 {
     QList<TextHighlightSpan> spans;
     QBitArray claimed;
+
+    // JSON comes first so that its strings are not split into paths, dates and keywords.
+    JsonScanner json{line};
+
+    for (qsizetype i{0}; i < line.size(); ++i) {
+        if (line[i] != u'{' && line[i] != u'[') {
+            continue;
+        }
+
+        const qsizetype end{json.scan(i, spans)};
+
+        if (end < 0) {
+            continue;
+        }
+
+        if (claimed.isEmpty()) {
+            claimed.resize(line.size());
+        }
+
+        claimed.fill(true, i, end);
+        i = end - 1;
+    }
 
     for (const auto &rule : rules()) {
         auto matches = rule.expression.globalMatchView(line);
