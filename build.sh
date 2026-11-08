@@ -162,7 +162,9 @@ if test == "1":
 json.dump(manifest, open(target, "w"), indent=4)
 EOF
 
-    local args=(--force-clean --install-deps-from=flathub --state-dir="$work/state" --ccache --disable-tests)
+    # rofiles-fuse can drop its mount during long builds ("Transport endpoint is not
+    # connected"), so copy files instead.
+    local args=(--force-clean --install-deps-from=flathub --state-dir="$work/state" --ccache --disable-tests --disable-rofiles-fuse)
 
     # A separate branch keeps the installed build apart from other org.kde.kwi
     # installations, such as nightlies.
